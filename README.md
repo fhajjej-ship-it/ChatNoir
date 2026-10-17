@@ -64,7 +64,38 @@ A second real-app review covered [Roadster Reference](docs/roadster-evaluation.m
 
 A [backend/auth/database evaluation](docs/backend-evaluation.md) then exercised a private FastAPI app with real service-token/JWT verification and fresh PostgreSQL. **18 API integration checks passed**, covering invalid credentials, JWT bypass attempts, SQL injection text and worker workspace consistency. No vulnerability or new ChatNoir defect was confirmed in that scope. That run excluded browser sign-in and complete customer authorization.
 
-A [browser/customer authorization follow-up](docs/browser-auth-evaluation.md) completed two local email-code sign-ins and **26 authorization assertions** across isolated browser sessions. It reproduced **one low-severity authentication finding**, retained privately pending app remediation. Selected cross-user reads/writes held; production Clerk/Google sign-in and complete customer isolation are not established. No new ChatNoir runtime defect surfaced.
+## Real app: Swarmix AI
+
+On October 16–17, 2026, ChatNoir guided a review and remediation of [Swarmix AI](https://swarmixai.com), a real application with a backend, customer authentication, workspace authorization and PostgreSQL. **An email-code race was reproduced and fixed; dependency remediation finished with zero `npm audit` findings.**
+
+### Email-code race: one code could create two sessions
+
+Two concurrent sign-in requests could both read the same unused email code before either marked it consumed. Actual NextAuth callbacks in two independent browser contexts produced **two authenticated sessions from one code**, even though later sequential replay was rejected. This was rated **low severity**: it violated the single-use guarantee but required possession of a valid code; it did not demonstrate sign-in without credentials or cross-user data access.
+
+**The fix:** atomically claim the code in PostgreSQL before creating an identity/session. The update must match an unused, unexpired code below the attempt limit, and only a request that updates exactly one row can proceed.
+
+| Verification | Before | After |
+|---|---|---|
+| PostgreSQL regression forcing both verifiers to read the unused code | 2 successful verifiers; regression failed | 1 successful verifier |
+| Actual NextAuth callbacks in 2 independent browser contexts | 2 authenticated sessions | 1 authenticated session |
+| Actual NextAuth callbacks in 8 independent browser contexts | Not measured | 1 authenticated session |
+| Sequential replay / fresh legitimate sign-in | Rejected / succeeded | Rejected / succeeded |
+
+Expired codes, exhausted attempts, repeated incorrect codes, and expiry/attempt changes between reading and claiming also passed regression checks. The [initial pre-remediation browser evaluation](docs/browser-auth-evaluation.md) separately recorded **26 passing authorization assertions**, including selected cross-user reads/writes. Those held boundaries did not cancel out the race finding.
+
+### Dependency vulnerabilities: audit evidence, then compatibility proof
+
+The release's `npm audit` gate flagged vulnerable dependencies. Compatible patches to **Next.js 16.3.8, Sharp 0.35.5 and source-map-js 1.2.2** reduced the audit's high/critical counts to zero. The remaining **10 moderate package findings** propagated from two underlying advisories: selector-parser CPU exhaustion and `sprintf-js` denial of service. These were vulnerable-version matches; app-level exploitability of the dependency advisories was not established.
+
+**The fix:** pin `postcss-selector-parser` to **7.1.6** within the typography dependency, and remove the vulnerable `sprintf-js` chains using **argparse 2.0.1** and **global-agent 4.1.3** overrides. The existing content parser and browser model library were retained; no advisory was suppressed.
+
+**Verification:** a clean install and both installed-tree and lockfile audits reported **0 vulnerabilities at every severity**. Four focused compatibility tests passed for YAML parsing/CLI behavior, typography selector handling, HTTP proxy bootstrap and HTTPS CONNECT routing. Three existing content tests passed; all **12 actual content files** retained identical parsed metadata/bodies, and all generated typography components/variants matched their previous output. CUDA/model downloads and model inference were not tested.
+
+### Shipped and checked
+
+Both fixes passed exact-revision correctness/security reviews, required CI and production builds. The reviewed artifacts were promoted to production; staged and production smoke checks, Vercel runtime-error checks and Sentry release-health checks passed. The auth fix merged as `40fd8e77`; the dependency follow-up merged as `46cb0ecc`.
+
+The race came from **ChatNoir's agent-guided source review and runtime validation**; dependency findings came from the separately available **`npm audit`**, not ChatNoir's baseline rules. Detailed source and release receipts remain private. Tests used local synthetic accounts and disposable PostgreSQL; no production exploit was demonstrated. Live mail delivery, production Clerk/Google sign-in and complete customer isolation remain unverified. This is bounded owner-run evidence, not a security certification. No new ChatNoir runtime defect was found in this evaluation.
 
 ## Install where you build
 
