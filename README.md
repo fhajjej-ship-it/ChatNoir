@@ -74,6 +74,14 @@ Two concurrent sign-in requests could both read the same unused email code befor
 
 **The fix:** atomically claim the code in PostgreSQL before creating an identity/session. The update must match an unused, unexpired code below the attempt limit, and only a request that updates exactly one row can proceed.
 
+**Run the public reproduction** (Python 3.10+, no dependencies or accounts):
+
+```sh
+python3 examples/email-code-race/demo.py
+```
+
+It reproduces multiple sessions before the fix and exactly one after it, with replay and legitimate sign-in controls. [Demo source, expected output and limits →](examples/email-code-race/README.md) This independently written synthetic SQLite fixture illustrates the same race; the real app's PostgreSQL/NextAuth results are below.
+
 | Verification | Before | After |
 |---|---|---|
 | PostgreSQL regression forcing both verifiers to read the unused code | 2 successful verifiers; regression failed | 1 successful verifier |
